@@ -1,4 +1,5 @@
 #include <Windows.h>
+#include <tlhelp32.h>
 #include <vector>
 #include <string>
 #include "kdriver.h"
@@ -37,7 +38,6 @@ bool patch(DWORD pid) {
 
 	auto vmbuf = new char[0x4000];
 	auto vmalloc = new char[0x4000];
-
 
 	printf("搜索特征码...");
 	bool patched = false;
@@ -114,7 +114,8 @@ int main() {
 
 	printf("【使用效果】降低DNF的cpu在原来基础上降低10%%~20%%，并提升组队流畅度。\n");
 	printf("【怎么用】开DNF的时候自己手动点开一下，等提示成功关了就行了。（为什么不弄自动的，因为我懒）\n");
-	printf("【怎么恢复】重启游戏。\n\n");
+	printf("【双开怎么用】先把游戏都打开再开这个\n");
+	printf("【怎么恢复】重启游戏即可。\n\n");
 
 	char msg[1000] = "警告：修改DNF内置ACE不知道会不会出制裁/掉线/封号，请自行承担使用风险哦！！！\n\n";
 	printf(msg);
@@ -128,17 +129,21 @@ int main() {
 
 	printf("等待DNF启动...              \r");
 	while (1) {
-		if (pid = threadMgr.getTargetPid()) {
+		if (!threadMgr.getTargetPid().empty()) {
+#ifdef _DEBUG
+			int t = 3;
+#else 
 			int t = 60;
+#endif
 			for (; t > 0; t--) {
-				if (pid = threadMgr.getTargetPid()) {
+				if (!threadMgr.getTargetPid().empty()) {
 					printf("DNF已启动，%d 秒后开始操作...           \r", t);
 					Sleep(1000);
 				} else {
 					break;
 				}
 			}
-			if (t == 0 && (pid = threadMgr.getTargetPid())) {
+			if (t == 0) {
 				break;
 			}
 		}
@@ -153,10 +158,14 @@ int main() {
 	}
 	printf("ok\n");
 
-	if (patch(pid)) {
-		printf("操作成功完成！\n\n");
-	} else {
-		printf("操作失败！\n\n");
+	auto pids = threadMgr.getTargetPid();
+	for (auto pid : pids) {
+		printf("正在处理DNF进程: pid = %d\n\n", pid);
+		if (patch(pid)) {
+			printf("操作成功完成！\n\n");
+		} else {
+			printf("操作失败！\n\n");
+		}
 	}
 
 	driver.unload();

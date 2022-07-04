@@ -42,7 +42,7 @@ public:
 	win32ThreadManager& operator= (const win32ThreadManager&)  = delete;
 	win32ThreadManager& operator= (win32ThreadManager&&)       = delete;
 
-	DWORD  getTargetPid(const char* procName = "DNF.exe");
+	std::vector<DWORD>  getTargetPid(const char* procName = "DNF.exe");
 	
 public:
 	DWORD                      pid;

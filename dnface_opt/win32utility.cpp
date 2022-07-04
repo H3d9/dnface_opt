@@ -54,30 +54,31 @@ void win32Thread::_mySwap(win32Thread& t1, win32Thread& t2) {
 win32ThreadManager::win32ThreadManager() 
 	: pid(0), threadCount(0), threadList{} {}
 
-DWORD win32ThreadManager::getTargetPid(const char* procName) {  // ret == 0 if no proc.
+std::vector<DWORD>
+win32ThreadManager::getTargetPid(const char* procName) {  // ret == 0 if no proc.
 
 	HANDLE            hSnapshot    = NULL;
 	PROCESSENTRY32    pe           = {};
 	pe.dwSize = sizeof(PROCESSENTRY32);
 
-
 	pid = 0;
 
 	hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if (hSnapshot == INVALID_HANDLE_VALUE) {
-		return 0;
+		return {};
 	}
+
+	std::vector<DWORD> result;
 
 	for (BOOL next = Process32First(hSnapshot, &pe); next; next = Process32Next(hSnapshot, &pe)) {
 		if (_strcmpi(pe.szExeFile, procName) == 0) {
-			pid = pe.th32ProcessID;
-			break; // assert: only 1 pinstance.
+			result.push_back(pe.th32ProcessID);
 		}
 	}
 
 	CloseHandle(hSnapshot);
 
-	return pid;
+	return result;
 }
 
 
