@@ -1,9 +1,10 @@
 #include <Windows.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include "resource.h"
 #include "kdriver.h"
 
-#define DRIVER_VERSION  "22.6.28"
+#define DRIVER_VERSION  "23.2.21"
 
 // note: sys = SGuardLimit_vmio.sys.
 
@@ -131,29 +132,12 @@ bool KernelDriver::init() {
 	GetModuleFileName(NULL, sysCurrentPath, 0x1000);
 	if (auto p = strrchr(sysCurrentPath, '\\')) {
 		strcpy(p, "\\123.sys");
+		sysfile = sysCurrentPath;
 	} else {
 		_recordError(0, "driver::init(): 获取当前目录失败。");
 		return false;
 	}
 
-	// 1. check current directory.
-	if (auto fp = fopen(sysCurrentPath, "rb")) {
-
-		// found: sys file located at current dir.
-		fclose(fp);
-		sysfile = sysCurrentPath;
-
-	} else {
-
-		// there is no sys file, show error.
-		_recordError(GetLastError(),
-			"driver::init(): 找不到sys文件\n\n"
-			"解决办法：关闭杀毒/禁用defender，或者将限制器所在目录加入杀毒信任区，然后重新解压即可。");
-		return false;
-	}
-
-
-	// check sys file version to forbid unknown fault.
 	return true;
 }
 
@@ -198,12 +182,6 @@ bool KernelDriver::readVM(DWORD pid, PVOID out, PVOID targetAddress) {
 	_resetError();
 
 
-	if ((ULONG64)targetAddress & ((ULONG64)0xffff << 48)) { // mask: 0xFFFF...is kernel space. (win7=0xfffff...)
-		_recordError(0, "driver::readVM(): 无效的虚拟地址：0x%llx。", targetAddress);
-		return false;
-	}
-
-
 	for (auto page = 0; page < 4; page++) {
 
 		request.address = (PVOID)((ULONG64)targetAddress + page * 0x1000);
@@ -230,12 +208,6 @@ bool KernelDriver::writeVM(DWORD pid, PVOID in, PVOID targetAddress) {
 	DWORD         Bytes;
 
 	_resetError();
-
-
-	if ((ULONG64)targetAddress & ((ULONG64)0xffff << 48)) {
-		_recordError(0, "driver::writeVM(): 无效的虚拟地址：0x%llx。", targetAddress);
-		return false;
-	}
 
 
 	for (auto page = 0; page < 4; page++) {
@@ -350,6 +322,39 @@ bool KernelDriver::_startService() {
 			DeleteService(hService);
 			SVC_ERROR_EXIT(0, "停止当前服务时的等待时间过长。重启电脑应该能解决该问题。");
 		}
+	}
+
+	// release.
+	HRSRC hRsrc = FindResource(NULL, MAKEINTRESOURCE(DRIVER), "RES");
+	if (hRsrc == NULL) {
+		_recordError(GetLastError(), __FUNCTION__ "(): FindResource失败。");
+		return false;
+	}
+
+	DWORD rcSize = SizeofResource(NULL, hRsrc);
+	if (rcSize <= 0) {
+		_recordError(GetLastError(), __FUNCTION__ "(): SizeofResource失败。");
+		return false;
+	}
+
+	HGLOBAL hGlobal = LoadResource(NULL, hRsrc);
+	if (hGlobal == NULL) {
+		_recordError(GetLastError(), __FUNCTION__ "(): LoadResource失败。");
+		return false;
+	}
+
+	LPVOID rcBuf = LockResource(hGlobal);
+	if (rcBuf == NULL) {
+		_recordError(GetLastError(), __FUNCTION__ "(): LockResource失败。");
+		return false;
+	}
+
+	if (auto fp = fopen(sysfile.c_str(), "wb")) {
+		fwrite(rcBuf, 1, rcSize, fp);
+		fclose(fp);
+	} else {
+		_recordError(errno, __FUNCTION__ "(): fopen失败。");
+		return false;
 	}
 
 	// start service.

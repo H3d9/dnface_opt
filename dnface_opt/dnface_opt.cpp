@@ -11,21 +11,26 @@ win32SystemManager& systemMgr = win32SystemManager::getInstance();
 
 bool patch(DWORD pid) {
 
+	bool isWow64 = false;
 	std::vector<ULONG64> rips;
 	std::vector<ULONG64> executeRange;
 
-	printf("搜索ACE-GDPServer64.dll模块...");
-	if (!driver.searchVad(pid, executeRange, L"ACE-GDPServer64.dll")) {
-		printf("fail\n");
-		systemMgr.panic(driver.errorCode, "searchVad 失败: %s", driver.errorMessage);
-		return false;
+	printf("搜索ACE-GDPServer模块...");
+
+	if (driver.searchVad(pid, executeRange, L"ACE-GDPServer64.dll") && !executeRange.empty()) {
+		printf("x64\n");
+		isWow64 = false;
+
+	} else if (driver.searchVad(pid, executeRange, L"ACE-GDPServer32.dll") && !executeRange.empty()) {
+		printf("x32\n");
+		isWow64 = true;
 	}
 	if (executeRange.empty()) {
 		printf("fail\n");
-		systemMgr.panic("无法在目标进程中找到模块");
+		systemMgr.panic(driver.errorCode, "搜索模块失败：%s", driver.errorMessage);
+
 		return false;
 	}
-	printf("ok\n");
 
 
 	for (size_t i = 0; i < executeRange.size(); i += 2) {
@@ -36,10 +41,8 @@ bool patch(DWORD pid) {
 		}
 	}
 
-	auto vmbuf = new char[0x4000];
-	auto vmalloc = new char[0x4000];
-
 	printf("搜索特征码...");
+	auto vmbuf = new char[0x4000];
 	bool patched = false;
 
 	for (auto rip = rips.begin(); rip != rips.end(); ++rip) {
@@ -50,34 +53,72 @@ bool patch(DWORD pid) {
 			continue;
 		}
 
-		for (LONG offset = 0; offset < 0x4000 - 0x100; offset++) {
+		for (LONG offset = 0; offset < 0x4000 - 100; offset++) {
 
-			const char pattern[] = "\x33\xC9\xFF\x15\xA5\xCC\x01\x00\xEB\xCD\x33\xC0\xEB\x05\xB8\x01\x00\x00\x00\x48\x83\xC4\x30\x5B\xC3\xCC\xCC\xCC\xCC\xCC\xCC\xCC";
-			if (0 == memcmp(pattern, vmbuf + offset, sizeof(pattern) - 1)) {
+			if (!isWow64) {
 
-				printf("%p + 0x%x\n", vmbuf, offset);
-				printf("应用补丁到内存...");
-				const char newcode[] = "\xEB\x17\xFF\x15\xA5\xCC\x01\x00\xEB\xCD\x33\xC0\xEB\x05\xB8\x01\x00\x00\x00\x48\x83\xC4\x30\x5B\xC3\xB9\x64\x00\x00\x00\xEB\xE2";
-				memcpy(vmbuf + offset, newcode, sizeof(newcode) - 1);
+				const char pattern[] = "\x33\xC9\xFF\x15\xA5\xCC\x01\x00\xEB\xCD\x33\xC0\xEB\x05\xB8\x01\x00\x00\x00\x48\x83\xC4\x30\x5B\xC3\xCC\xCC\xCC\xCC\xCC\xCC\xCC";
 
-				if (driver.writeVM(pid, vmbuf, (PVOID)vmStartAddress)) {
-					printf("ok\n");
-					printf("刷新指令缓存...");
-					auto hProc = OpenProcess(PROCESS_ALL_ACCESS, NULL, pid);
-					if (hProc) {
-						if (!FlushInstructionCache(hProc, (PVOID)vmStartAddress, 0x4000)) {
-							printf("fail\n");
+				if (0 == memcmp(pattern, vmbuf + offset, sizeof(pattern) - 1)) {
+					printf("%llx + 0x%x\n", vmStartAddress, offset);
+
+					printf("应用补丁到内存...");
+					const char newcode[] = "\xEB\x17\xFF\x15\xA5\xCC\x01\x00\xEB\xCD\x33\xC0\xEB\x05\xB8\x01\x00\x00\x00\x48\x83\xC4\x30\x5B\xC3\xB9\x64\x00\x00\x00\xEB\xE2";
+					memcpy(vmbuf + offset, newcode, sizeof(newcode) - 1);
+
+					if (driver.writeVM(pid, vmbuf, (PVOID)vmStartAddress)) {
+						printf("ok\n");
+
+						printf("刷新指令缓存...");
+						auto hProc = OpenProcess(PROCESS_ALL_ACCESS, NULL, pid); 
+						if (hProc) {
+							if (!FlushInstructionCache(hProc, (PVOID)vmStartAddress, 0x4000)) {
+								printf("fail\n");
+							}
+							CloseHandle(hProc);
 						}
-						CloseHandle(hProc);
+						printf("ok\n");
+						patched = true;
+					} else {
+						printf("fail\n");
+						systemMgr.panic(driver.errorCode, "writeVM failed at 0x%llx : %s", vmStartAddress, driver.errorMessage);
 					}
-					printf("ok\n");
-					patched = true;
-				} else {
-					printf("fail\n");
-					systemMgr.panic(driver.errorCode, "writeVM failed at 0x%llx : %s", vmStartAddress, driver.errorMessage);
+
+					break;
 				}
-				
-				break;
+
+			} else {
+
+				const char pattern[] = "\x6a\x00\xff\xd7\xeb\xd9";
+
+				if (0 == memcmp(pattern, vmbuf + offset, sizeof(pattern) - 1)) {
+					printf("%llx + 0x%x\n", vmStartAddress, offset);
+
+					printf("应用补丁到内存...");
+					const char newcode[] = "\x6a\x64\xff\xd7\xeb\xd9";
+					memcpy(vmbuf + offset, newcode, sizeof(newcode) - 1);
+
+					if (driver.writeVM(pid, vmbuf, (PVOID)vmStartAddress)) {
+						printf("ok\n");
+
+						printf("刷新指令缓存...");
+						auto hProc = OpenProcess(PROCESS_ALL_ACCESS, NULL, pid);
+						if (hProc) {
+							if (!FlushInstructionCache(hProc, (PVOID)vmStartAddress, 0x4000)) {
+								printf("fail\n");
+							}
+							CloseHandle(hProc);
+						}
+						printf("ok\n");
+						patched = true;
+					} else {
+						printf("fail\n");
+						systemMgr.panic(driver.errorCode, "writeVM failed at 0x%llx : %s", vmStartAddress, driver.errorMessage);
+					}
+
+					break;
+				}
+
 			}
 		}
 
@@ -87,7 +128,6 @@ bool patch(DWORD pid) {
 	}
 
 	delete[] vmbuf;
-	delete[] vmalloc;
 
 	if (!patched) {
 		printf("未找到\n");
@@ -95,6 +135,8 @@ bool patch(DWORD pid) {
 
 	return patched;
 }
+
+
 
 int main() {
 
