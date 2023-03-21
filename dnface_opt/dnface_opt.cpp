@@ -159,6 +159,9 @@ int main() {
 	printf("【双开怎么用】先把游戏都打开再开这个\n");
 	printf("【怎么恢复】重启游戏即可。\n\n");
 
+	printf("【更新地址】https://www.bilibili.com/read/cv20499064\n");
+	printf("【Github】https://github.com/H3d9/dnface_opt\n\n\n");
+
 	char msg[1000] = "警告：修改DNF内置ACE不知道会不会出制裁/掉线/封号，请自行承担使用风险哦！！！\n\n";
 	printf(msg);
 	strcat(msg, "\n继续吗？？？");
